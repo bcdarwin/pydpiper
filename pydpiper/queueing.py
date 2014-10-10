@@ -6,7 +6,7 @@ from os import mkdir
 import os
 import re
 
-SLEEP_TIME = 1000
+WAIT_TIME = 1000
 
 class runOnQueueingSystem():
     def __init__(self, options, sysArgs=None):
@@ -120,15 +120,25 @@ class runOnQueueingSystem():
         self.jobFile.write("cd $PBS_O_WORKDIR\n\n") # jobs start in $HOME; $PBS_O_WORKDIR is the submission directory
         if mainCommand:
             self.jobFile.write(self.buildMainCommand())
-            self.jobFile.write(" &\n\n")
-            self.jobFile.write("sleep 10 \n\n") # local executor only needs to sleep for startup time of server
         if launchExecs:
-            if not mainCommand:
-                self.jobFile.write("sleep %s\n\n" % SLEEP_TIME) # sleep to ensure that pipeline server has time to start
-            self.jobFile.write("pipeline_executor.py --num-executors=1 --uri-file=%s --proc=%d --mem=%.2f" % (self.uri_file, execProcs, self.mem))
+            cmd = "pipeline_executor.py --num-executors=1 --uri-file=%s --proc=%d --mem=%.2f" % (self.uri_file, execProcs, self.mem)
             if self.ns:
-                self.jobFile.write(" --use-ns")
-            self.jobFile.write(" &\n\n")
+                cmd += " --use-ns "
+            cmd += " & \n"
+            if mainCommand:
+                self.jobFile.write(" &\n\n")
+                self.jobFile.write("sleep 10\n") # local executor only needs to sleep for startup time of server
+                self.jobFile.write(cmd)
+            else:
+                self.jobFile.write("export t=0 dt=5\n maxt=%s\n" % WAIT_TIME)
+                self.jobFile.write("while ((t < maxt)); do\n")
+                self.jobFile.write("  if [[ -f %s ]]; then\n" % self.uri_file)
+                self.jobFile.write("    " + cmd)
+                self.jobFile.write("    break\n")
+                self.jobFile.write("  fi\n")
+                self.jobFile.write("  t=$((t+dt))\n")
+                self.jobFile.write("  sleep $t\n")
+                self.jobFile.write("done\n\n")
     def completeJobFile(self):
         """Completes pbs script--wait for background jobs to terminate as per scinet wiki"""
         self.jobFile.write("wait" + "\n")
