@@ -6,8 +6,6 @@ from os import mkdir
 import os
 import re
 
-SLEEP_TIME = 1000
-
 class runOnQueueingSystem():
     def __init__(self, options, sysArgs=None):
         #Note: options are the same as whatever is in calling program
@@ -22,12 +20,14 @@ class runOnQueueingSystem():
             self.ppn = 8
             self.queue_name = options.queue_name or options.queue or "batch"
             self.queue_type = "pbs"
+            self.wait_time = options.wait_time or 1000
         else:
             self.mem = options.mem
             self.procs = options.proc
             self.ppn = options.ppn
             self.queue_name = options.queue_name or options.queue
             self.queue_type = options.queue or options.queue_type
+            self.wait_time = 0
         self.arguments = sysArgs #sys.argv in calling program
         self.numexec = options.num_exec 
         self.time = options.time or "2:00:00:00"      
@@ -44,9 +44,11 @@ class runOnQueueingSystem():
             executablePath = os.path.abspath(self.arguments[0])
             self.jobName = basename(executablePath)
     def relevant(arg):
+        """Should an argument be passed along from the pydpiper command constructing jobs
+        into the script to launch the server?"""
         if re.search("--queue-name", arg):
             return True
-        elif re.search("--(num-executors|proc|queue|mem|time|ppn)", arg):
+        elif re.search("--(num-executors|proc|queue|mem|time|ppn|wait)", arg):
             return False
         else:
             return True
@@ -123,11 +125,11 @@ class runOnQueueingSystem():
             self.jobFile.write(" &\n\n")
             self.jobFile.write("sleep 10 \n\n") # local executor only needs to sleep for startup time of server
         if launchExecs:
-            if not mainCommand:
-                self.jobFile.write("sleep %s\n\n" % SLEEP_TIME) # sleep to ensure that pipeline server has time to start
             self.jobFile.write("pipeline_executor.py --num-executors=1 --uri-file=%s --proc=%d --mem=%.2f" % (self.uri_file, execProcs, self.mem))
+            if not mainCommand:
+                self.jobFile.write(" --wait-time=%s " % self.wait_time)
             if self.ns:
-                self.jobFile.write(" --use-ns")
+                self.jobFile.write(" --use-ns ")
             self.jobFile.write(" &\n\n")
     def completeJobFile(self):
         """Completes pbs script--wait for background jobs to terminate as per scinet wiki"""

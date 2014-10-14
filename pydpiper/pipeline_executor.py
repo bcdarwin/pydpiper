@@ -74,6 +74,8 @@ def addExecutorOptionGroup(parser):
     group.add_option("--time-to-accept-jobs", dest="time_to_accept_jobs", 
                       type="int", default=180,
                       help="The number of minutes after which an executor will not accept new jobs anymore. This can be useful when running executors on a batch system where other (competing) jobs run for a limited amount of time. The executors can behave in a similar way by given them a rough end time. [Default=3 hours]")
+    group.add_option("--wait-time", dest="wait_time", type="int", default=0,
+                      help="Number of seconds [default: 0, or 1000 if --scinet] for remote executors to wait for the server to start. Use when starting executors from a PBS queue job script.")
     parser.add_option_group(group)
 
 
@@ -96,12 +98,31 @@ def launchExecutor(executor):
     clientURI = daemon.register(executor)
 
     # find the URI of the server:
+    time_slept = 0
+    dt = 10
+    # TODO better error reporting when we exceed wait_time?
     if executor.ns:
-        ns = Pyro4.locateNS()
-        #ns.register("executor", executor, safe=True)
+        err = None
+        while time_slept < executor.wait_time:
+            try:
+                ns = Pyro4.locateNS()
+                break
+            except Exception as e:
+                err = e
+            time.sleep(dt)
+            time_slept += dt
+        if err is not None:
+            raise e
         serverURI = ns.lookup("pipeline")
     else:
+        while time_slept < executor.wait_time:
+            if os.path.isfile(executor.uri_file):
+                break
+            logger.debug("Sleeping until URI file is available")
+            time.sleep(dt)
+            time_slept += dt
         try:
+            logger.debug("Wachet auf, ...")
             uf = open(executor.uri_file)
             serverURI = Pyro4.URI(uf.readline())
             uf.close()
@@ -256,6 +277,7 @@ class pipelineExecutor():
         self.serverURI = None
         self.current_running_job_pids = []
         self.registered_with_server = False
+        self.wait_time = options.wait_time
         # we associate an event with each executor which is set when jobs complete.
         # in the future it might also be set by the server, and we might have more
         # than one event (for reclaiming, server messages, ...)
